@@ -1,5 +1,4 @@
 import json
-from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
 from xservice.parsers.search import DefaultSearchResultParser
@@ -71,7 +70,7 @@ class TwitterGraphQLProvider(BaseProvider):
         operation = GRAPHQL_OPERATIONS[op_name]
         params = {
             "variables": json.dumps(variables),
-            "features": json.dumps(asdict(operation.features)),
+            "features": json.dumps(operation.features),
             "fieldToggles": json.dumps(operation.field_toggles),
         }
         return await self._request("GET", f"{self._api_url}/{operation.query_id}/{op_name}", params=params)
