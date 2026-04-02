@@ -1,0 +1,79 @@
+import asyncio
+import time
+from typing import Dict, Optional
+
+from .models import Session
+
+
+class SessionPool:
+    """A simple in-memory session pool."""
+
+    def __init__(self) -> None:
+        self._sessions: Dict[str, Session] = {}
+        self._available_sessions: asyncio.Queue[str] = asyncio.Queue()
+        self._lock = asyncio.Lock()
+        self._closed = False
+
+    async def add_session(self, session: Session) -> None:
+        """Add a session to the pool."""
+        async with self._lock:
+            if self._closed:
+                raise RuntimeError("SessionPool is closed.")
+            if session.session_id not in self._sessions:
+                self._sessions[session.session_id] = session
+                await self._available_sessions.put(session.session_id)
+
+    async def get_session(self) -> Optional[Session]:
+        """Get an available session from the pool.
+
+        Waits for a session to become available if none are currently free.
+        """
+        if self._closed:
+            return None
+
+        session_id = await self._available_sessions.get()
+        async with self._lock:
+            if self._closed:
+                # This can happen if close() is called while a task is waiting on the queue
+                await self._available_sessions.put(session_id)  # Put it back
+                return None
+
+            session = self._sessions.get(session_id)
+            if session:
+                session.in_use = True
+                session.last_used = time.time()
+                return session
+        return None  # Should not happen in normal operation
+
+    async def release_session(self, session_id: str) -> None:
+        """Release a session back to the pool."""
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if session:
+                session.in_use = False
+                if not self._closed:
+                    await self._available_sessions.put(session_id)
+
+    @property
+    def size(self) -> int:
+        """Return the total number of sessions in the pool."""
+        return len(self._sessions)
+
+    @property
+    def available_size(self) -> int:
+        """Return the number of available sessions."""
+        return self._available_sessions.qsize()
+
+    async def close(self) -> None:
+        """Close the session pool and prevent further use."""
+        async with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            # Empty the queue
+            while not self._available_sessions.empty():
+                try:
+                    self._available_sessions.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            self._sessions.clear()

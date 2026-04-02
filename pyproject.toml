@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "xservice"
+version = "0.1.0"
+description = "X-Service"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+packages = [{include = "xservice", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.110.0"
+uvicorn = {extras = ["standard"], version = "^0.27.1"}
+pydantic-settings = "^2.2.1"
+sqlalchemy = "^2.0.28"
+psycopg2-binary = "^2.9.9"
+alembic = "^1.13.1"
+python-dotenv = "^1.0.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.1.1"
+pytest-asyncio = "^1.3.0"
+
+[tool.poetry.scripts]
+xservice-cli = "xservice.cli:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.main"
