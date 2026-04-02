@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 
-from xservice.api.routes import admin, health, search, users, tweets
+from xservice.api.routes import admin, health, search, users, tweets, playground
 
 from xservice.logging import log
 from xservice.settings import settings
@@ -25,6 +25,7 @@ def create_app() -> FastAPI:
     api_router.include_router(users.router, prefix="/users", tags=["users"])
     api_router.include_router(tweets.router, prefix="/tweets", tags=["tweets"])
     app.include_router(api_router, prefix=settings.API_V1_STR)
+    app.include_router(playground.router)
 
     @app.get("/")
     def read_root():

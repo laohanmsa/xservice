@@ -30,6 +30,11 @@ There are two primary ways to develop locally:
 
     This will create a new `.env` file with secure, random credentials for a local PostgreSQL database, ready to be used with Docker Compose. It will not overwrite an existing `.env` file. By default, the application is configured to use the PostgreSQL database via Docker Compose.
 
+    The app also supports a built-in API playground at `/playground`. By default,
+    it uses `PLAYGROUND_DEFAULT_API_KEY`, which is intended for local/demo use and
+    is prefilled in the Web UI. Override that value in your `.env` file if you do
+    not want the default shared key.
+
 ## Development with Docker Compose
 
 This is the recommended approach for a consistent environment that mirrors production.
