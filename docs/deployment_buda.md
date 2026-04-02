@@ -27,15 +27,22 @@ This document describes the process for deploying the `xservice` application to 
 
 ## Deployment Steps
 
-1.  **Pull latest changes**:
+1.  **Set the Host Port (Optional)**:
+    The application's host port is configurable via the `XSERVICE_PORT` environment variable. If this variable is not set, it defaults to `8000`. To run the service on a different port (e.g., `8080`), you can export the variable before running Docker Compose:
+
+    ```bash
+    export XSERVICE_PORT=8080
+    ```
+
+2.  **Pull latest changes**:
     Ensure you have the latest version of the `main` branch.
 
     ```bash
     git pull origin main
     ```
 
-2.  **Build and start the services**:
-    Use Docker Compose to build the `app` image and start both the `app` and `postgres` services in detached mode.
+3.  **Build and start the services**:
+    Use Docker Compose to build the `app` image and start both the `app` and `postgres` services in detached mode. The command will pick up the `XSERVICE_PORT` from the environment.
 
     ```bash
     docker compose up --build -d
@@ -55,7 +62,7 @@ You can view the logs for the application:
 docker compose logs -f app
 ```
 
-The application should now be accessible at `http://<buda_ip>:8000`.
+The application should now be accessible at `http://<buda_ip>:${XSERVICE_PORT}` (e.g., `http://<buda_ip>:8000` if the variable is not set, or `http://<buda_ip>:8080` if you exported it as such).
 
 ## Future Work
 

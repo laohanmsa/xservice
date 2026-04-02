@@ -16,7 +16,7 @@ RUN pip install poetry
 COPY poetry.lock pyproject.toml ./
 
 # Install dependencies
-RUN poetry install --no-root --no-dev
+RUN poetry install --no-root --without dev
 
 # --- Final Stage ---
 # Creates the final production image
