@@ -1,15 +1,17 @@
+import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
-import time
 
 @dataclass
 class Session:
     session_id: str
     headers: Dict[str, str]
     cookies: Dict[str, str]
+    db_id: int | None = None
     rate_limit_info: Dict[str, int] = field(default_factory=dict)
     last_used: float = field(default_factory=time.time)
     in_use: bool = False
+
 
 @dataclass
 class RateLimit:

@@ -1,5 +1,7 @@
 import asyncio
+import inspect
 import time
+from collections.abc import Awaitable, Callable
 from typing import Dict, Optional
 
 from .models import Session
@@ -8,11 +10,16 @@ from .models import Session
 class SessionPool:
     """A simple in-memory session pool."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        on_rate_limit_update: Callable[[int, dict[str, int]], Awaitable[None] | None]
+        | None = None,
+    ) -> None:
         self._sessions: Dict[str, Session] = {}
         self._available_sessions: asyncio.Queue[str] = asyncio.Queue()
         self._lock = asyncio.Lock()
         self._closed = False
+        self._on_rate_limit_update = on_rate_limit_update
 
     async def add_session(self, session: Session) -> None:
         """Add a session to the pool."""
@@ -53,6 +60,19 @@ class SessionPool:
                 session.in_use = False
                 if not self._closed:
                     await self._available_sessions.put(session_id)
+
+    async def update_rate_limit(
+        self, session_id: str, rate_limit_state: dict[str, int]
+    ) -> None:
+        session = self._sessions.get(session_id)
+        if not session:
+            return
+
+        session.rate_limit_info = rate_limit_state
+        if self._on_rate_limit_update and session.db_id is not None:
+            result = self._on_rate_limit_update(session.db_id, rate_limit_state)
+            if inspect.isawaitable(result):
+                await result
 
     @property
     def size(self) -> int:

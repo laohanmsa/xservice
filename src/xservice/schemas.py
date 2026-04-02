@@ -63,6 +63,24 @@ class XAccountSession(XAccountSessionBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class XAccountSessionImportCookie(BaseModel):
+    cookie_string: str
+    username: str | None = None
+    label: str | None = None
+    is_active: bool | None = True
+
+
+class XAccountSessionRateLimitInfo(BaseModel):
+    id: int
+    session_id: uuid.UUID
+    username: str
+    label: str | None
+    is_active: bool
+    rate_limit_state: dict[str, Any]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class AdminStatusSessionSummary(BaseModel):
     id: int
     session_id: uuid.UUID

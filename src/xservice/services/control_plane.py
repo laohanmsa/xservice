@@ -1,7 +1,50 @@
-import uuid
 import secrets
+import uuid
+from http.cookies import SimpleCookie
+
 from sqlalchemy.orm import Session
+
 from .. import models, schemas
+
+_X_BEARER_TOKEN = (
+    "Bearer "
+    "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs="
+    "1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+)
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
+)
+
+
+def _parse_cookie_string(cookie_string: str) -> dict[str, str]:
+    parsed = SimpleCookie()
+    parsed.load(cookie_string)
+    return {key: morsel.value for key, morsel in parsed.items()}
+
+
+def _derive_session_username(username: str | None, cookies: dict[str, str]) -> str:
+    if username:
+        return username
+
+    twid = cookies.get("twid", "").strip('"')
+    if twid.startswith("u="):
+        return f"user_{twid.removeprefix('u=')}"
+    if twid.startswith("u%3D"):
+        return f"user_{twid.removeprefix('u%3D')}"
+    return f"session-{secrets.token_hex(4)}"
+
+
+def _build_headers_for_cookies(cookies: dict[str, str]) -> dict[str, str]:
+    return {
+        "authorization": _X_BEARER_TOKEN,
+        "referer": "https://twitter.com/",
+        "user-agent": _DEFAULT_USER_AGENT,
+        "x-csrf-token": cookies.get("ct0", ""),
+        "x-twitter-auth-type": "OAuth2Session" if cookies.get("auth_token") else "",
+        "x-twitter-active-user": "yes",
+        "x-twitter-client-language": "en",
+    }
 
 
 class ControlPlaneService:
@@ -29,12 +72,33 @@ class ControlPlaneService:
     def get_sessions(self):
         return self.db.query(models.XAccountSession).all()
 
+    def get_session_limits(self) -> list[schemas.XAccountSessionRateLimitInfo]:
+        return [
+            schemas.XAccountSessionRateLimitInfo.model_validate(session)
+            for session in self.get_sessions()
+        ]
+
     def create_session(self, session: schemas.XAccountSessionCreate):
         db_session = models.XAccountSession(**session.model_dump(), session_id=uuid.uuid4())
         self.db.add(db_session)
         self.db.commit()
         self.db.refresh(db_session)
         return db_session
+
+    def create_session_from_cookie(self, session: schemas.XAccountSessionImportCookie):
+        cookies = _parse_cookie_string(session.cookie_string)
+        headers = _build_headers_for_cookies(cookies)
+        username = _derive_session_username(session.username, cookies)
+
+        session_create = schemas.XAccountSessionCreate(
+            username=username,
+            label=session.label,
+            is_active=session.is_active if session.is_active is not None else True,
+            cookies=cookies,
+            headers=headers,
+        )
+
+        return self.create_session(session=session_create)
 
     def update_session(self, session_id: int, session: schemas.XAccountSessionUpdate):
         db_session = self.db.query(models.XAccountSession).filter(models.XAccountSession.id == session_id).first()

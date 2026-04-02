@@ -59,6 +59,16 @@ def create_session(
     return service.create_session(session=session)
 
 
+@router.post("/sessions/import-cookie", response_model=schemas.XAccountSession)
+def import_cookie(
+    session: schemas.XAccountSessionImportCookie,
+    db: Session = Depends(get_db),
+    _: ApiKey = Depends(get_api_key),
+):
+    service = ControlPlaneService(db)
+    return service.create_session_from_cookie(session=session)
+
+
 @router.patch("/sessions/{session_id}", response_model=schemas.XAccountSession)
 def update_session(
     session_id: int,
@@ -84,9 +94,20 @@ def delete_session(
     return {"ok": True}
 
 
+@router.get(
+    "/session-limits", response_model=list[schemas.XAccountSessionRateLimitInfo]
+)
+def get_session_limits(
+    db: Session = Depends(get_db), _: ApiKey = Depends(get_api_key)
+):
+    service = ControlPlaneService(db)
+    return service.get_session_limits()
+
+
 @router.get("/status", response_model=schemas.AdminStatus)
 def get_status(
     db: Session = Depends(get_db), _: ApiKey = Depends(get_api_key)
 ):
     service = ControlPlaneService(db)
     return service.get_status()
+

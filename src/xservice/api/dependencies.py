@@ -31,9 +31,20 @@ async def get_provider(
             status_code=503, detail="No active X account sessions available."
         )
 
-    pool = SessionPool()
+    async def rate_limit_updater(session_db_id: int, rate_limit_state: dict[str, int]):
+        db_session = (
+            db.query(XAccountSession)
+            .filter(XAccountSession.id == session_db_id)
+            .first()
+        )
+        if db_session:
+            db_session.rate_limit_state = rate_limit_state
+            db.commit()
+
+    pool = SessionPool(on_rate_limit_update=rate_limit_updater)
     for session in active_sessions:
         provider_session = ProviderSession(
+            db_id=session.id,
             session_id=str(session.session_id),
             headers=session.headers or {},
             cookies=session.cookies or {},
