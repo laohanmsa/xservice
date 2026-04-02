@@ -54,6 +54,22 @@ HTML_CONTENT = f"""
         .control-group {{
             margin-bottom: 1.5rem;
         }}
+        .operation-meta {{
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            background-color: var(--bg-color);
+            border: 1px solid var(--input-border);
+            border-radius: var(--border-radius);
+        }}
+        .operation-meta h2 {{
+            margin: 0 0 0.5rem;
+            font-size: 1.1rem;
+        }}
+        .operation-meta p {{
+            margin: 0;
+            line-height: 1.5;
+            color: #d0d0d0;
+        }}
         label {{
             display: block;
             margin-bottom: 0.5rem;
@@ -124,6 +140,11 @@ HTML_CONTENT = f"""
                     <select id="operation-selector"></select>
                 </div>
 
+                <div id="operation-meta" class="operation-meta hidden">
+                    <h2 id="operation-summary"></h2>
+                    <p id="operation-description"></p>
+                </div>
+
                 <div id="parameters-container"></div>
                 
                 <div id="request-body-container" class="control-group hidden">
@@ -155,6 +176,9 @@ HTML_CONTENT = f"""
             const apiKeyInput = document.getElementById('api-key');
             const operationSelector = document.getElementById('operation-selector');
             const paramsContainer = document.getElementById('parameters-container');
+            const operationMeta = document.getElementById('operation-meta');
+            const operationSummaryElem = document.getElementById('operation-summary');
+            const operationDescriptionElem = document.getElementById('operation-description');
             const requestBodyContainer = document.getElementById('request-body-container');
             const requestBodyInput = document.getElementById('request-body');
             const sendBtn = document.getElementById('send-request-btn');
@@ -207,6 +231,18 @@ HTML_CONTENT = f"""
 
             function renderInputs() {{
                 paramsContainer.innerHTML = '';
+                const summary = selectedOperation.details.summary || '';
+                const description = selectedOperation.details.description || '';
+
+                if (summary || description) {{
+                    operationMeta.classList.remove('hidden');
+                    operationSummaryElem.textContent = summary || 'Operation details';
+                    operationDescriptionElem.textContent = description;
+                }} else {{
+                    operationMeta.classList.add('hidden');
+                    operationSummaryElem.textContent = '';
+                    operationDescriptionElem.textContent = '';
+                }}
                 
                 const parameters = selectedOperation.details.parameters || [];
                 parameters.forEach(param => {{

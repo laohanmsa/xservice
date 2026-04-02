@@ -133,7 +133,18 @@ async def get_user_tweets(
     provider_page = await handle_provider_call(provider.user_tweets(username=username, limit=limit))
     return _map_tweet_page(provider_page)
 
-@router.get("/{username}/following/", response_model=ApiUserPage, tags=["users"])
+@router.get(
+    "/{username}/following/",
+    response_model=ApiUserPage,
+    tags=["users"],
+    summary="Get accounts this user follows",
+    description=(
+        "Returns X's current following timeline page. "
+        "X does not currently expose a true asc/desc relationship-time ordering "
+        "control for this endpoint, so xservice returns the upstream page order "
+        "and cursor as-is."
+    ),
+)
 async def get_user_following(
     username: str,
     limit: int = Query(100),
@@ -143,7 +154,18 @@ async def get_user_following(
     provider_page = await handle_provider_call(provider.user_following(username=username, limit=limit))
     return _map_user_page(provider_page)
 
-@router.get("/{username}/followers/", response_model=ApiUserPage, tags=["users"])
+@router.get(
+    "/{username}/followers/",
+    response_model=ApiUserPage,
+    tags=["users"],
+    summary="Get this user's followers",
+    description=(
+        "Returns X's current followers timeline page. "
+        "X does not currently expose a true asc/desc relationship-time ordering "
+        "control for this endpoint, so xservice returns the upstream page order "
+        "and cursor as-is."
+    ),
+)
 async def get_user_followers(
     username: str,
     limit: int = Query(100),
