@@ -65,16 +65,36 @@ DEFAULT_FIELD_TOGGLES = {
 @dataclass
 class GraphqlQuery:
     query_id: str
+    method: str = "GET"
+    use_transaction_id: bool = False
     features: Dict[str, Any] = field(default_factory=lambda: DEFAULT_FEATURES.copy())
     field_toggles: Dict[str, Any] = field(default_factory=lambda: DEFAULT_FIELD_TOGGLES.copy())
 
+# Special configuration for SearchTimeline
+search_timeline_features = DEFAULT_FEATURES.copy()
+search_timeline_features.update({
+    'content_disclosure_indicator_enabled': True,
+    'content_disclosure_ai_generated_indicator_enabled': True,
+})
+
+search_timeline_field_toggles = DEFAULT_FIELD_TOGGLES.copy()
+search_timeline_field_toggles.update({
+    'withArticleSummaryText': True,
+    'withArticleVoiceOver': True,
+})
+
 GRAPHQL_OPERATIONS = {
-    "SearchTimeline": GraphqlQuery(query_id="cGK-Qeg1XJc2sZ6kgQw_Iw"),
+    "SearchTimeline": GraphqlQuery(
+        query_id="n0vzau71jvBmSJzo48XTEA",
+        method="POST",
+        features=search_timeline_features,
+        field_toggles=search_timeline_field_toggles,
+    ),
     "UserByScreenName": GraphqlQuery(query_id="AWbeRIdkLtqTRN7yL_H8yw"),
     "UserByRestId": GraphqlQuery(query_id="pBP53RhZiQHExruxf-I8ig"),
     "UserTweets": GraphqlQuery(query_id="eApPT8jppbYXlweF_ByTyA"),
-    "Following": GraphqlQuery(query_id="M3LO-sJg6BCWdEliN_C2fQ"),
-    "Followers": GraphqlQuery(query_id="efNzdTpE-mkUcLARCd3RPQ"),
+    "Following": GraphqlQuery(query_id="y8rK2apaUhS7Y8KF-U9w4Q", use_transaction_id=True),
+    "Followers": GraphqlQuery(query_id="uTBZ2DQt9_tqwVDaEeVSog", use_transaction_id=True),
     "Likes": GraphqlQuery(query_id="JPxbOQGc_tXQ0Y29mvHKSw"),
     "UserMedia": GraphqlQuery(query_id="SJpoWbz8n_i3vN3sOPfXvw"),
     "UserTweetsAndReplies": GraphqlQuery(query_id="aDl2OEiH_EFH10mA_ewZ9A"),

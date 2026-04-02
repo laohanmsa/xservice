@@ -1,5 +1,11 @@
 import json
-from typing import Any, Dict, List, Optional
+import asyncio
+from typing import Any, Coroutine, Dict, List, Optional
+
+import bs4
+import httpx
+from x_client_transaction import ClientTransaction
+from x_client_transaction.utils import get_ondemand_file_url
 
 from xservice.parsers.search import DefaultSearchResultParser
 from xservice.parsers.tweets import DefaultTweetEntriesParser, DefaultTweetPageParser, DefaultTweetParser
@@ -10,6 +16,7 @@ from .exceptions import OperationError
 from .models import SearchPage, Tweet, TweetPage, UserPage, UserProfile
 from .registry import GRAPHQL_OPERATIONS
 from .session_pool import SessionPool
+
 
 def _extract_instructions(data: dict) -> list[dict]:
     d = data.get("data", data)
@@ -42,6 +49,7 @@ def _extract_instructions(data: dict) -> list[dict]:
 
     return []
 
+
 def _extract_entries(data: dict) -> list[dict]:
     instructions = _extract_instructions(data)
     entries: list[dict] = []
@@ -55,6 +63,7 @@ def _extract_entries(data: dict) -> list[dict]:
                 entries.append(entry)
     return entries
 
+
 class TwitterGraphQLProvider(BaseProvider):
     def __init__(self, session_pool: SessionPool):
         super().__init__(session_pool)
@@ -66,33 +75,124 @@ class TwitterGraphQLProvider(BaseProvider):
         self._user_page_parser = DefaultUserPageParser()
         self._single_tweet_parser = DefaultTweetParser()
 
-    async def _execute(self, op_name: str, variables: dict) -> dict:
-        operation = GRAPHQL_OPERATIONS[op_name]
-        params = {
-            "variables": json.dumps(variables),
-            "features": json.dumps(operation.features),
-            "fieldToggles": json.dumps(operation.field_toggles),
-        }
-        return await self._request("GET", f"{self._api_url}/{operation.query_id}/{op_name}", params=params)
+        # For x-client-transaction-id
+        self._client_transaction: Optional[ClientTransaction] = None
+        self._ct_lock = asyncio.Lock()
+        self._ct_init_task: Optional[asyncio.Task] = None
 
-    async def search(self, query: str, category: str = "Latest", limit: int = 20) -> SearchPage:
-        # Category mappings (SearchCategory equivalent)
-        # We can map top, latest, people, photos, videos to search logic, but actually the GraphQL endpoint
-        # usually handles product. For SearchTimeline, 'product': 'Top' or 'Latest'
+    async def _ensure_client_transaction_initialized(self):
+        """Ensure the ClientTransaction object is initialized, handling concurrency."""
+        async with self._ct_lock:
+            if self._client_transaction:
+                return
+            if self._ct_init_task and not self._ct_init_task.done():
+                await self._ct_init_task
+                return
+            self._ct_init_task = asyncio.create_task(self._init_client_transaction())
+
+        await self._ct_init_task
+        async with self._ct_lock:
+            self._ct_init_task = None
+
+
+    async def _init_client_transaction(self):
+        """
+        Fetches x.com homepage and the ondemand.js file to initialize
+        the ClientTransaction object needed for generating X-Client-Transaction-Id.
+        """
+        if self._client_transaction:
+            return
+
+        session = await self._session_pool.get_session()
+        if not session:
+            raise OperationError("No available sessions in the pool to initialize ClientTransaction.")
+
+        try:
+            # Use a standard httpx client for fetching the resources
+            async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
+                headers = session.headers.copy()
+                cookies = session.cookies.copy()
+                
+                # Step 1: Fetch x.com homepage
+                home_resp = await client.get("https://x.com", headers=headers, cookies=cookies)
+                home_resp.raise_for_status()
+                home_html = home_resp.text
+                home_page_soup = bs4.BeautifulSoup(home_html, "lxml")
+
+                # Step 2: Get and fetch the ondemand.js file
+                ondemand_url = get_ondemand_file_url(response=home_page_soup)
+                if not ondemand_url:
+                    raise OperationError("Could not find ondemand.js URL in x.com homepage.")
+
+                ondemand_resp = await client.get(ondemand_url, headers=headers, cookies=cookies)
+                ondemand_resp.raise_for_status()
+                ondemand_text = ondemand_resp.text
+
+                # Step 3: Create the ClientTransaction object
+                self._client_transaction = ClientTransaction(
+                    home_page_response=home_page_soup, ondemand_file_response=ondemand_text
+                )
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            raise OperationError("Failed to fetch resources for X-Client-Transaction-Id generation", underlying_error=e) from e
+        except Exception as e:
+            # Catch any other exception during init and wrap it
+            raise OperationError("Failed to initialize X-Client-Transaction-Id generator", underlying_error=e) from e
+        finally:
+            if session:
+                await self._session_pool.release_session(session.session_id)
+
+
+    async def _execute_graphql_query(self, op_name: str, variables: dict) -> dict:
+        operation = GRAPHQL_OPERATIONS[op_name]
+        api_path = f"/{operation.query_id}/{op_name}"
+        headers = {}
+
+        if operation.use_transaction_id:
+            await self._ensure_client_transaction_initialized()
+            if self._client_transaction:
+                try:
+                    tid = self._client_transaction.generate_transaction_id(method=operation.method, path=f"/i/api/graphql{api_path}")
+                    headers["x-client-transaction-id"] = tid
+                except Exception as e:
+                    raise OperationError("Failed to generate x-client-transaction-id", underlying_error=e)
+            else:
+                raise OperationError("x-client-transaction-id is required but generator is not initialized.")
+
+
+        if operation.method == "POST":
+            payload = {
+                "variables": variables,
+                "features": operation.features,
+                "fieldToggles": operation.field_toggles,
+            }
+            return await self._request("POST", f"{self._api_url}{api_path}", json=payload, headers=headers)
+        else:  # Default to GET
+            params = {
+                "variables": json.dumps(variables),
+                "features": json.dumps(operation.features),
+                "fieldToggles": json.dumps(operation.field_toggles),
+            }
+            return await self._request("GET", f"{self._api_url}{api_path}", params=params, headers=headers)
+
+    async def search(self, query: str, category: str = "Latest", limit: int = 20, cursor: Optional[str] = None) -> SearchPage:
         product = category if category in ("Top", "Latest", "People", "Photos", "Videos") else "Latest"
         variables = {
             "rawQuery": query,
             "count": limit,
             "querySource": "typed_query",
-            "product": product
+            "product": product,
+            "withGrokTranslatedBio": product in ("Top", "People"),
         }
-        response = await self._execute("SearchTimeline", variables)
+        if cursor:
+            variables["cursor"] = cursor
+
+        response = await self._execute_graphql_query("SearchTimeline", variables)
         entries = _extract_entries(response)
         return self._search_parser.parse(entries, category=category, raw_data=response)
 
     async def user_by_username(self, username: str) -> Optional[UserProfile]:
         variables = {"screen_name": username, "withSafetyModeUserFields": True}
-        response = await self._execute("UserByScreenName", variables)
+        response = await self._execute_graphql_query("UserByScreenName", variables)
         try:
             user_data = response.get("data", {}).get("user", {}).get("result", {})
             if not user_data:
@@ -103,7 +203,7 @@ class TwitterGraphQLProvider(BaseProvider):
 
     async def user_by_id(self, user_id: str) -> Optional[UserProfile]:
         variables = {"userId": user_id, "withSafetyModeUserFields": True}
-        response = await self._execute("UserByRestId", variables)
+        response = await self._execute_graphql_query("UserByRestId", variables)
         try:
             user_data = response.get("data", {}).get("user", {}).get("result", {})
             if not user_data:
@@ -121,7 +221,7 @@ class TwitterGraphQLProvider(BaseProvider):
             return TweetPage(tweets=[], count=0)
 
         variables = {"userId": user.id, "count": limit, "includePromotedContent": True, "withQuickPromoteEligibilityTweetFields": True, "withVoice": True, "withV2Timeline": True}
-        response = await self._execute("UserTweets", variables)
+        response = await self._execute_graphql_query("UserTweets", variables)
         entries = _extract_entries(response)
         return self._tweet_page_parser.parse(entries, data=response)
 
@@ -132,8 +232,8 @@ class TwitterGraphQLProvider(BaseProvider):
         user = await self.user_info(username)
         if not user:
             return UserPage(users=[], count=0)
-        variables = {"userId": user.id, "count": limit, "includePromotedContent": False}
-        response = await self._execute("Following", variables)
+        variables = {"userId": user.id, "count": limit, "includePromotedContent": False, "withGrokTranslatedBio": False}
+        response = await self._execute_graphql_query("Following", variables)
         entries = _extract_entries(response)
         return self._user_page_parser.parse(entries, data=response)
 
@@ -141,8 +241,8 @@ class TwitterGraphQLProvider(BaseProvider):
         user = await self.user_info(username)
         if not user:
             return UserPage(users=[], count=0)
-        variables = {"userId": user.id, "count": limit, "includePromotedContent": False}
-        response = await self._execute("Followers", variables)
+        variables = {"userId": user.id, "count": limit, "includePromotedContent": False, "withGrokTranslatedBio": False}
+        response = await self._execute_graphql_query("Followers", variables)
         entries = _extract_entries(response)
         return self._user_page_parser.parse(entries, data=response)
 
@@ -151,7 +251,7 @@ class TwitterGraphQLProvider(BaseProvider):
         if not user:
             return TweetPage(tweets=[], count=0)
         variables = {"userId": user.id, "count": limit, "includePromotedContent": False}
-        response = await self._execute("Likes", variables)
+        response = await self._execute_graphql_query("Likes", variables)
         entries = _extract_entries(response)
         return self._tweet_page_parser.parse(entries, data=response)
 
@@ -160,7 +260,7 @@ class TwitterGraphQLProvider(BaseProvider):
         if not user:
             return TweetPage(tweets=[], count=0)
         variables = {"userId": user.id, "count": limit, "includePromotedContent": False, "withVoice": True, "withV2Timeline": True}
-        response = await self._execute("UserMedia", variables)
+        response = await self._execute_graphql_query("UserMedia", variables)
         entries = _extract_entries(response)
         return self._tweet_page_parser.parse(entries, data=response)
 
@@ -169,7 +269,7 @@ class TwitterGraphQLProvider(BaseProvider):
         if not user:
             return TweetPage(tweets=[], count=0)
         variables = {"userId": user.id, "count": limit, "includePromotedContent": True, "withVoice": True, "withV2Timeline": True}
-        response = await self._execute("UserTweetsAndReplies", variables)
+        response = await self._execute_graphql_query("UserTweetsAndReplies", variables)
         entries = _extract_entries(response)
         return self._tweet_page_parser.parse(entries, data=response)
 
@@ -184,7 +284,7 @@ class TwitterGraphQLProvider(BaseProvider):
             "withVoice": True,
             "withV2Timeline": True
         }
-        response = await self._execute("TweetDetail", variables)
+        response = await self._execute_graphql_query("TweetDetail", variables)
         entries = _extract_entries(response)
         if not entries:
             tweet_result = response.get("data", {}).get("tweetResult", {}).get("result", {})
@@ -216,12 +316,12 @@ class TwitterGraphQLProvider(BaseProvider):
 
     async def tweet_retweeters(self, tweet_id: str, limit: int = 100) -> UserPage:
         variables = {"tweetId": tweet_id, "count": limit, "includePromotedContent": True}
-        response = await self._execute("Retweeters", variables)
+        response = await self._execute_graphql_query("Retweeters", variables)
         entries = _extract_entries(response)
         return self._user_page_parser.parse(entries, data=response)
 
     async def tweet_favoriters(self, tweet_id: str, limit: int = 100) -> UserPage:
         variables = {"tweetId": tweet_id, "count": limit, "includePromotedContent": True}
-        response = await self._execute("Favoriters", variables)
+        response = await self._execute_graphql_query("Favoriters", variables)
         entries = _extract_entries(response)
         return self._user_page_parser.parse(entries, data=response)

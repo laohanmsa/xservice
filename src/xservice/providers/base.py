@@ -27,18 +27,23 @@ class BaseProvider(Provider):
         url: str,
         params: Optional[Dict[str, Any]] = None,
         json: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         session = await self._session_pool.get_session()
         if not session:
             raise SessionAcquisitionError("No available sessions in the pool.")
 
         try:
+            request_headers = session.headers.copy()
+            if headers:
+                request_headers.update(headers)
+
             response = await self._client.request(
                 method,
                 url,
                 params=params,
                 json=json,
-                headers=session.headers,
+                headers=request_headers,
                 cookies=session.cookies,
                 timeout=10.0,  # Adding a timeout for all requests
             )
