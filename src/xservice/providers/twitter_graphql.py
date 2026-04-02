@@ -108,8 +108,8 @@ class TwitterGraphQLProvider(BaseProvider):
             raise OperationError("No available sessions in the pool to initialize ClientTransaction.")
 
         try:
-            # Use a standard httpx client for fetching the resources
-            async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
+            # HTTP/2 is not required for the txid bootstrap fetches.
+            async with httpx.AsyncClient(follow_redirects=True) as client:
                 headers = session.headers.copy()
                 cookies = session.cookies.copy()
                 
