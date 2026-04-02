@@ -110,11 +110,11 @@ class TwitterGraphQLProvider(BaseProvider):
         try:
             # HTTP/2 is not required for the txid bootstrap fetches.
             async with httpx.AsyncClient(follow_redirects=True) as client:
-                headers = session.headers.copy()
-                cookies = session.cookies.copy()
+                user_agent = session.headers.get("user-agent", "Mozilla/5.0")
+                headers = {"user-agent": user_agent}
                 
                 # Step 1: Fetch x.com homepage
-                home_resp = await client.get("https://x.com", headers=headers, cookies=cookies)
+                home_resp = await client.get("https://x.com", headers=headers)
                 home_resp.raise_for_status()
                 home_html = home_resp.text
                 home_page_soup = bs4.BeautifulSoup(home_html, "lxml")
@@ -124,7 +124,7 @@ class TwitterGraphQLProvider(BaseProvider):
                 if not ondemand_url:
                     raise OperationError("Could not find ondemand.js URL in x.com homepage.")
 
-                ondemand_resp = await client.get(ondemand_url, headers=headers, cookies=cookies)
+                ondemand_resp = await client.get(ondemand_url, headers=headers)
                 ondemand_resp.raise_for_status()
                 ondemand_text = ondemand_resp.text
 
