@@ -165,14 +165,18 @@ class TwitterGraphQLProvider(BaseProvider):
                 "features": operation.features,
                 "fieldToggles": operation.field_toggles,
             }
-            return await self._request("POST", f"{self._api_url}{api_path}", json=payload, headers=headers)
+            return await self._request(
+                "POST", f"{self._api_url}{api_path}", operation=op_name, json=payload, headers=headers
+            )
         else:  # Default to GET
             params = {
                 "variables": json.dumps(variables),
                 "features": json.dumps(operation.features),
                 "fieldToggles": json.dumps(operation.field_toggles),
             }
-            return await self._request("GET", f"{self._api_url}{api_path}", params=params, headers=headers)
+            return await self._request(
+                "GET", f"{self._api_url}{api_path}", operation=op_name, params=params, headers=headers
+            )
 
     async def search(self, query: str, category: str = "Latest", limit: int = 20, cursor: Optional[str] = None) -> SearchPage:
         product = category if category in ("Top", "Latest", "People", "Photos", "Videos") else "Latest"

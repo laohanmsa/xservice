@@ -62,7 +62,9 @@ class XAccountSession(TimestampedModel):
     # Provider-specific state, stored as JSON
     cookies: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
     headers: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
-    rate_limit_state: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
+    rate_limit_state: Mapped[dict[str, dict[str, int]] | None] = mapped_column(
+        JSON, nullable=True
+    )
 
     def __repr__(self) -> str:
         return f"<XAccountSession id={self.id} username='{self.username}'>"

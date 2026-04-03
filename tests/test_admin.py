@@ -125,8 +125,7 @@ def test_get_session_limits(client: TestClient, auth_headers: dict[str, str]):
     session_data = {
         "username": "testuser",
         "label": "test label",
-        "rate_limit_state": {"test": 123},
-    }
+        "rate_limit_state": {"test": {"limit": 100, "remaining": 99, "reset": 123456}},    }
     response = client.post(
         "/api/v1/admin/sessions", json=session_data, headers=auth_headers
     )
@@ -142,7 +141,7 @@ def test_get_session_limits(client: TestClient, auth_headers: dict[str, str]):
     assert our_limit is not None
     assert our_limit["username"] == "testuser"
     assert our_limit["label"] == "test label"
-    assert our_limit["rate_limit_state"] == {"test": 123}
+    assert our_limit["rate_limit_state"] == {"test": {"limit": 100, "remaining": 99, "reset": 123456}}
 
 
 def test_get_provider_no_sessions(client: TestClient, auth_headers: dict[str, str]):
@@ -200,8 +199,7 @@ def test_get_status(client: TestClient, auth_headers: dict[str, str]):
         json={
             "username": "testuser_active",
             "is_active": True,
-            "rate_limit_state": {"test": 1},
-        },
+            "rate_limit_state": {"test": {"limit": 100, "remaining": 99, "reset": 123456}},        },
         headers=auth_headers,
     )
     assert response.status_code == 200
@@ -232,4 +230,4 @@ def test_get_status(client: TestClient, auth_headers: dict[str, str]):
     assert active_session_status is not None
     assert active_session_status["username"].startswith("testuser")
     assert active_session_status["is_active"] is True
-    assert active_session_status["rate_limit_state"] == {"test": 1}
+    assert active_session_status["rate_limit_state"] == {"test": {"limit": 100, "remaining": 99, "reset": 123456}}

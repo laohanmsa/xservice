@@ -8,7 +8,7 @@ class Session:
     headers: Dict[str, str]
     cookies: Dict[str, str]
     db_id: int | None = None
-    rate_limit_info: Dict[str, int] = field(default_factory=dict)
+    rate_limit_info: Dict[str, Dict[str, int]] = field(default_factory=dict)
     last_used: float = field(default_factory=time.time)
     in_use: bool = False
 

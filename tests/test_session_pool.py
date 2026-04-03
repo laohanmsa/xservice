@@ -103,3 +103,34 @@ async def test_concurrent_session_requests(session_pool: SessionPool):
 
     assert len(results) == 10
     assert session_pool.available_size == 5
+
+@pytest.mark.asyncio
+async def test_update_rate_limit_for_multiple_operations(
+    session_pool: SessionPool, sample_session: Session
+):
+    """
+    Proves one session retains rate-limit buckets for two different
+    operations after successive updates.
+    """
+    await session_pool.add_session(sample_session)
+
+    operation1 = "search"
+    rate_limit1 = {"limit": 100, "remaining": 99, "reset": 1678886400}
+    await session_pool.update_rate_limit(
+        sample_session.session_id, operation1, rate_limit1
+    )
+
+    # force-get session to check internal state
+    session = session_pool._sessions[sample_session.session_id]
+    assert session.rate_limit_info == {operation1: rate_limit1}
+
+    operation2 = "users"
+    rate_limit2 = {"limit": 50, "remaining": 49, "reset": 1678886420}
+    await session_pool.update_rate_limit(
+        sample_session.session_id, operation2, rate_limit2
+    )
+
+    assert session.rate_limit_info == {
+        operation1: rate_limit1,
+        operation2: rate_limit2,
+    }

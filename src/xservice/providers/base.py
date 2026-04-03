@@ -25,6 +25,7 @@ class BaseProvider(Provider):
         self,
         method: str,
         url: str,
+        operation: str,
         params: Optional[Dict[str, Any]] = None,
         json: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, str]] = None,
@@ -51,7 +52,7 @@ class BaseProvider(Provider):
             rate_limit_state = _parse_rate_limit_headers(response.headers)
             if rate_limit_state:
                 await self._session_pool.update_rate_limit(
-                    session.session_id, rate_limit_state
+                    session.session_id, operation, rate_limit_state
                 )
             return response.json()
         except httpx.HTTPStatusError as e:

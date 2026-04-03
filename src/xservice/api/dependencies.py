@@ -1,4 +1,4 @@
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -31,7 +31,7 @@ async def get_provider(
             status_code=503, detail="No active X account sessions available."
         )
 
-    async def rate_limit_updater(session_db_id: int, rate_limit_state: dict[str, int]):
+    async def rate_limit_updater(session_db_id: int, rate_limit_state: dict[str, Any]):
         db_session = (
             db.query(XAccountSession)
             .filter(XAccountSession.id == session_db_id)

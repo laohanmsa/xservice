@@ -12,7 +12,7 @@ class SessionPool:
 
     def __init__(
         self,
-        on_rate_limit_update: Callable[[int, dict[str, int]], Awaitable[None] | None]
+        on_rate_limit_update: Callable[[int, dict[str, dict[str, int]]], Awaitable[None] | None]
         | None = None,
     ) -> None:
         self._sessions: Dict[str, Session] = {}
@@ -62,15 +62,18 @@ class SessionPool:
                     await self._available_sessions.put(session_id)
 
     async def update_rate_limit(
-        self, session_id: str, rate_limit_state: dict[str, int]
+        self, session_id: str, operation: str, rate_limit_state: dict[str, int]
     ) -> None:
         session = self._sessions.get(session_id)
         if not session:
             return
 
-        session.rate_limit_info = rate_limit_state
+        if not isinstance(session.rate_limit_info, dict):
+            session.rate_limit_info = {}
+
+        session.rate_limit_info[operation] = rate_limit_state
         if self._on_rate_limit_update and session.db_id is not None:
-            result = self._on_rate_limit_update(session.db_id, rate_limit_state)
+            result = self._on_rate_limit_update(session.db_id, session.rate_limit_info)
             if inspect.isawaitable(result):
                 await result
 

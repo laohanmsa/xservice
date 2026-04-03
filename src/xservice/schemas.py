@@ -34,13 +34,19 @@ class ApiKeyMetadata(ApiKeyBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class RateLimitState(BaseModel):
+    limit: int
+    remaining: int
+    reset: int
+
+
 class XAccountSessionBase(BaseModel):
     username: str
     label: str | None = None
     is_active: bool = True
     cookies: dict[str, Any] = Field(default_factory=dict)
     headers: dict[str, Any] = Field(default_factory=dict)
-    rate_limit_state: dict[str, Any] = Field(default_factory=dict)
+    rate_limit_state: dict[str, RateLimitState] = Field(default_factory=dict)
 
 
 class XAccountSessionCreate(XAccountSessionBase):
@@ -76,7 +82,7 @@ class XAccountSessionRateLimitInfo(BaseModel):
     username: str
     label: str | None
     is_active: bool
-    rate_limit_state: dict[str, Any]
+    rate_limit_state: dict[str, RateLimitState]
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -86,7 +92,7 @@ class AdminStatusSessionSummary(BaseModel):
     session_id: uuid.UUID
     username: str
     is_active: bool
-    rate_limit_state: dict[str, Any]
+    rate_limit_state: dict[str, RateLimitState]
     created_at: datetime
     updated_at: datetime
 
