@@ -53,6 +53,14 @@ def _default_cookie_label(index: int) -> str:
     return f"default-cookie-{index}"
 
 
+def _legacy_cookie_label(index: int) -> str:
+    return f"legacy-cookie-{index}"
+
+
+def _managed_cookie_aliases(index: int) -> set[str]:
+    return {_default_cookie_label(index), _legacy_cookie_label(index)}
+
+
 def _read_cookie_lines(cookie_file_path: str) -> list[str]:
     return [
         line.strip()
@@ -101,14 +109,16 @@ class ControlPlaneService:
         self,
         sessions: list[models.XAccountSession],
         *,
+        index: int,
         label: str,
         cookies: dict[str, str],
     ) -> models.XAccountSession | None:
         auth_token = cookies.get("auth_token")
         twid = cookies.get("twid")
+        aliases = _managed_cookie_aliases(index)
 
         for session in sessions:
-            if session.label == label:
+            if session.label in aliases or session.username in aliases:
                 return session
 
         for session in sessions:
@@ -136,34 +146,64 @@ class ControlPlaneService:
 
         for index, cookie_string in enumerate(cookie_lines[:expected_count], start=1):
             label = _default_cookie_label(index)
+            aliases = _managed_cookie_aliases(index)
             cookies = _parse_cookie_string(cookie_string)
             headers = _build_headers_for_cookies(cookies)
-            existing = self._find_session_for_default_cookie(
-                sessions, label=label, cookies=cookies
+            resolved_session = self._find_session_for_default_cookie(
+                sessions, index=index, label=label, cookies=cookies
             )
 
-            if existing:
-                existing.username = label
-                existing.label = label
-                existing.is_active = True
-                existing.cookies = cookies
-                existing.headers = headers
-                existing.rate_limit_state = existing.rate_limit_state or {}
-                ensured_sessions.append(existing)
+            duplicate_alias_sessions = [
+                session
+                for session in list(sessions)
+                if session is not resolved_session
+                and (
+                    (session.label or "") in aliases
+                    or (session.username or "") in aliases
+                )
+            ]
+            for session in duplicate_alias_sessions:
+                if session.id is not None:
+                    self.db.delete(session)
+                sessions.remove(session)
+            if duplicate_alias_sessions:
+                self.db.flush()
+
+            if resolved_session:
+                resolved_session.username = label
+                resolved_session.label = label
+                resolved_session.is_active = True
+                resolved_session.cookies = cookies
+                resolved_session.headers = headers
+                resolved_session.rate_limit_state = resolved_session.rate_limit_state or {}
+            else:
+                resolved_session = models.XAccountSession(
+                    session_id=uuid.uuid4(),
+                    username=label,
+                    label=label,
+                    is_active=True,
+                    cookies=cookies,
+                    headers=headers,
+                    rate_limit_state={},
+                )
+                self.db.add(resolved_session)
+                sessions.append(resolved_session)
+
+            ensured_sessions.append(resolved_session)
+
+        ensured_ids = {session.id for session in ensured_sessions if session.id is not None}
+        managed_prefixes = ("default-cookie-", "legacy-cookie-")
+        for session in sessions:
+            if session.id is None:
                 continue
-
-            created = models.XAccountSession(
-                session_id=uuid.uuid4(),
-                username=label,
-                label=label,
-                is_active=True,
-                cookies=cookies,
-                headers=headers,
-                rate_limit_state={},
-            )
-            self.db.add(created)
-            sessions.append(created)
-            ensured_sessions.append(created)
+            if session.id in ensured_ids:
+                continue
+            session_label = session.label or ""
+            session_username = session.username or ""
+            if session_label.startswith(managed_prefixes) or session_username.startswith(
+                managed_prefixes
+            ):
+                self.db.delete(session)
 
         self.db.commit()
         for session in ensured_sessions:

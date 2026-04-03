@@ -65,6 +65,40 @@ def test_bootstrap_default_sessions_reuses_existing_cookie_identity(db, tmp_path
     assert sessions[0].cookies["auth_token"] == "auth1=="
 
 
+def test_bootstrap_default_sessions_reuses_legacy_slot_and_cleans_duplicates(
+    db, tmp_path: Path
+):
+    service = ControlPlaneService(db)
+    service.create_session_from_cookie(
+        XAccountSessionImportCookie(
+            cookie_string="ct0=oldcsrf; twid=u%3D999; auth_token=oldauth==",
+            username="legacy-cookie-2",
+            label="legacy-cookie-2",
+        )
+    )
+    service.create_session_from_cookie(
+        XAccountSessionImportCookie(
+            cookie_string="ct0=dupecsrf; twid=u%3D888; auth_token=dupeauth==",
+            username="default-cookie-2",
+            label="default-cookie-2",
+        )
+    )
+    cookie_file = _write_cookie_file(tmp_path / "default_cookies.txt", 2)
+
+    ensured = service.bootstrap_default_sessions(
+        cookie_file_path=str(cookie_file), expected_count=2
+    )
+
+    sessions = sorted(service.get_sessions(), key=lambda session: session.label or "")
+    assert ensured == 2
+    assert len(sessions) == 2
+    assert [session.label for session in sessions] == [
+        "default-cookie-1",
+        "default-cookie-2",
+    ]
+    assert sessions[1].cookies["auth_token"] == "auth2=="
+
+
 def test_startup_bootstrap_uses_settings_and_session_factory(
     db, tmp_path: Path, monkeypatch
 ):
