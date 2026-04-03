@@ -88,7 +88,12 @@ class ControlPlaneService:
 
     def get_session_limits(self) -> list[schemas.XAccountSessionRateLimitInfo]:
         return [
-            schemas.XAccountSessionRateLimitInfo.model_validate(session)
+            schemas.XAccountSessionRateLimitInfo.model_validate(
+                {
+                    **schemas.XAccountSession.model_validate(session).model_dump(),
+                    "rate_limit_state": session.rate_limit_state or {},
+                }
+            )
             for session in self.get_sessions()
         ]
 
@@ -143,6 +148,7 @@ class ControlPlaneService:
                 existing.is_active = True
                 existing.cookies = cookies
                 existing.headers = headers
+                existing.rate_limit_state = existing.rate_limit_state or {}
                 ensured_sessions.append(existing)
                 continue
 
@@ -153,6 +159,7 @@ class ControlPlaneService:
                 is_active=True,
                 cookies=cookies,
                 headers=headers,
+                rate_limit_state={},
             )
             self.db.add(created)
             sessions.append(created)
@@ -218,6 +225,14 @@ class ControlPlaneService:
             active_session_count=active_session_count,
             inactive_session_count=inactive_session_count,
             sessions=[
-                schemas.AdminStatusSessionSummary.model_validate(s) for s in sessions
+                schemas.AdminStatusSessionSummary.model_validate(
+                    {
+                        **schemas.XAccountSession.model_validate(s).model_dump(),
+                        "created_at": s.created_at,
+                        "updated_at": s.updated_at,
+                        "rate_limit_state": s.rate_limit_state or {},
+                    }
+                )
+                for s in sessions
             ],
         )
