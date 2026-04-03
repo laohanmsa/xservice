@@ -1,6 +1,8 @@
 import pytest
+import sqlalchemy as sa
 from fastapi import Depends
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from xservice.api.dependencies import get_db, get_provider
 from xservice.auth import get_api_key
@@ -231,3 +233,72 @@ def test_get_status(client: TestClient, auth_headers: dict[str, str]):
     assert active_session_status["username"].startswith("testuser")
     assert active_session_status["is_active"] is True
     assert active_session_status["rate_limit_state"] == {"test": {"limit": 100, "remaining": 99, "reset": 123456}}
+
+
+@pytest.fixture
+def legacy_session_in_db(db: Session) -> XAccountSession:
+    """
+    Creates a session with a legacy flat rate_limit_state in the database.
+    Bypasses the ORM to ensure the database has the old data shape.
+    """
+    # Use a raw query to force the legacy shape into the JSON field
+    legacy_rate_limit_state = {"limit": 50, "remaining": 49, "reset": 12345}
+
+    session = XAccountSession(
+        username="legacy_user",
+        label="legacy_label",
+        is_active=True,
+        cookies={},
+        headers={},
+        # The model expects a valid new-style shape, so we'll overwrite it later
+        rate_limit_state={},
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    # Now, use a raw query to force the legacy shape into the JSON field
+    db.execute(
+        sa.update(XAccountSession)
+        .where(XAccountSession.id == session.id)
+        .values(rate_limit_state=legacy_rate_limit_state)
+    )
+    db.commit()
+    db.refresh(session)
+
+    return session
+
+
+def test_get_admin_endpoints_with_legacy_rate_limit_state(
+    client: TestClient, auth_headers: dict[str, str], legacy_session_in_db: XAccountSession
+):
+    """
+    Focused regression test for legacy-flat compatibility path.
+    """
+    # Test /api/v1/admin/status
+    response = client.get("/api/v1/admin/status", headers=auth_headers)
+    assert response.status_code == 200
+    status = response.json()
+
+    session_summary = next(
+        (s for s in status["sessions"] if s["id"] == legacy_session_in_db.id), None
+    )
+    assert session_summary is not None
+    assert session_summary["username"] == "legacy_user"
+    assert session_summary["rate_limit_state"] == {
+        "default": {"limit": 50, "remaining": 49, "reset": 12345}
+    }
+
+    # Test /api/v1/admin/session-limits
+    response = client.get("/api/v1/admin/session-limits", headers=auth_headers)
+    assert response.status_code == 200
+    limits = response.json()
+
+    limit_info = next(
+        (l for l in limits if l["id"] == legacy_session_in_db.id), None
+    )
+    assert limit_info is not None
+    assert limit_info["username"] == "legacy_user"
+    assert limit_info["rate_limit_state"] == {
+        "default": {"limit": 50, "remaining": 49, "reset": 12345}
+    }

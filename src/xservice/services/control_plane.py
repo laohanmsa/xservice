@@ -1,7 +1,9 @@
+import json
 import secrets
 import uuid
 from http.cookies import SimpleCookie
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -17,6 +19,28 @@ _DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
 )
+
+
+def _normalize_rate_limit_state(
+    rate_limit_state: Any | None,
+) -> dict[str, Any]:
+    if not rate_limit_state:
+        return {}
+
+    if isinstance(rate_limit_state, str):
+        try:
+            rate_limit_state = json.loads(rate_limit_state)
+        except json.JSONDecodeError:
+            log.warning("Failed to parse rate_limit_state: %s", rate_limit_state)
+            return {}
+
+    if not isinstance(rate_limit_state, dict):
+        return {}
+
+    if "limit" in rate_limit_state and "remaining" in rate_limit_state:
+        return {"default": rate_limit_state}
+    return rate_limit_state
+
 
 
 def _parse_cookie_string(cookie_string: str) -> dict[str, str]:
@@ -96,11 +120,13 @@ class ControlPlaneService:
 
     def get_session_limits(self) -> list[schemas.XAccountSessionRateLimitInfo]:
         return [
-            schemas.XAccountSessionRateLimitInfo.model_validate(
-                {
-                    **schemas.XAccountSession.model_validate(session).model_dump(),
-                    "rate_limit_state": session.rate_limit_state or {},
-                }
+            schemas.XAccountSessionRateLimitInfo(
+                id=session.id,
+                session_id=session.session_id,
+                username=session.username,
+                label=session.label,
+                is_active=session.is_active,
+                rate_limit_state=_normalize_rate_limit_state(session.rate_limit_state),
             )
             for session in self.get_sessions()
         ]
@@ -265,13 +291,14 @@ class ControlPlaneService:
             active_session_count=active_session_count,
             inactive_session_count=inactive_session_count,
             sessions=[
-                schemas.AdminStatusSessionSummary.model_validate(
-                    {
-                        **schemas.XAccountSession.model_validate(s).model_dump(),
-                        "created_at": s.created_at,
-                        "updated_at": s.updated_at,
-                        "rate_limit_state": s.rate_limit_state or {},
-                    }
+                schemas.AdminStatusSessionSummary(
+                    id=s.id,
+                    session_id=s.session_id,
+                    username=s.username,
+                    is_active=s.is_active,
+                    rate_limit_state=_normalize_rate_limit_state(s.rate_limit_state),
+                    created_at=s.created_at,
+                    updated_at=s.updated_at,
                 )
                 for s in sessions
             ],
