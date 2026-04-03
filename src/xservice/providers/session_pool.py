@@ -30,15 +30,19 @@ class SessionPool:
                 self._sessions[session.session_id] = session
                 await self._available_sessions.put(session.session_id)
 
-    async def get_session(self, operation: Optional[str] = None) -> Optional[Session]:
+    async def get_session(
+        self, operation: Optional[str] = None, exclude_ids: Optional[set[str]] = None
+    ) -> Optional[Session]:
         """Get an available session from the pool.
-
         If an operation is specified, it returns the session with the highest
         remaining quota for that operation.
-
+        If `exclude_ids` is provided, sessions with those IDs are ignored.
         Waits for a session to become available if none are currently free.
         """
         if self._closed:
+            return None
+
+        if not self._sessions:
             return None
 
         # Wait for at least one session to be available. This is the blocking part.
@@ -66,16 +70,35 @@ class SessionPool:
                 # Put the IDs back and let the caller retry.
                 for sid in all_ids:
                     await self._available_sessions.put(sid)
-                return None  # Caller should retry if they want.
+                return None
+
+            # Filter out excluded sessions
+            eligible_sessions = available_sessions
+            if exclude_ids:
+                eligible_sessions = [
+                    s for s in eligible_sessions if s.session_id not in exclude_ids
+                ]
+
+            if not eligible_sessions:
+                # All available sessions were excluded. Put them back and return None.
+                for s in available_sessions:
+                    await self._available_sessions.put(s.session_id)
+                return None
 
             # Select the best session from the available ones.
-            best_session = self._find_best_session(available_sessions, operation)
+            best_session = self._find_best_session(eligible_sessions, operation)
+
+            if not best_session:
+                # Could not find a suitable session. Put all original sessions back.
+                for s in available_sessions:
+                    await self._available_sessions.put(s.session_id)
+                return None
 
             # Mark the chosen session as in use.
             best_session.in_use = True
             best_session.last_used = time.time()
 
-            # Put the other available sessions back into the queue.
+            # Put the other available (but not chosen) sessions back into the queue.
             for s in available_sessions:
                 if s.session_id != best_session.session_id:
                     await self._available_sessions.put(s.session_id)
@@ -84,10 +107,10 @@ class SessionPool:
 
     def _find_best_session(
         self, sessions: list[Session], operation: Optional[str]
-    ) -> Session:
+    ) -> Optional[Session]:
         """Find the best session from a list of available sessions."""
         if not sessions:
-            raise ValueError("Cannot find best session in an empty list.")
+            return None
 
         # If no operation, return first available session (queue-like)
         if not operation:
@@ -117,7 +140,10 @@ class SessionPool:
 
         # Fallback if no session has info for this operation.
         # The list is already in a stable, dequeued order.
-        return fallback_sessions[0]
+        if fallback_sessions:
+            return fallback_sessions[0]
+
+        return None
 
     async def release_session(self, session_id: str) -> None:
         """Release a session back to the pool."""

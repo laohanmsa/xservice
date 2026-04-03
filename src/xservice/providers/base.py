@@ -30,43 +30,64 @@ class BaseProvider(Provider):
         json: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        session = await self._session_pool.get_session(operation=operation)
-        if not session:
-            raise SessionAcquisitionError("No available sessions in the pool.")
+        excluded_session_ids: set[str] = set()
+        last_exception: Optional[Exception] = None
 
-        try:
-            request_headers = session.headers.copy()
-            if headers:
-                request_headers.update(headers)
-
-            response = await self._client.request(
-                method,
-                url,
-                params=params,
-                json=json,
-                headers=request_headers,
-                cookies=session.cookies,
-                timeout=10.0,  # Adding a timeout for all requests
+        while True:
+            session = await self._session_pool.get_session(
+                operation=operation, exclude_ids=excluded_session_ids
             )
-            response.raise_for_status()
-            rate_limit_state = _parse_rate_limit_headers(response.headers)
-            if rate_limit_state:
-                await self._session_pool.update_rate_limit(
-                    session.session_id, operation, rate_limit_state
+
+            if not session:
+                if last_exception:
+                    raise last_exception
+                raise SessionAcquisitionError(
+                    "No available sessions to service this request."
                 )
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                f"HTTP error occurred: {e.request.url} - {e.response.status_code}"
-            )
-            raise OperationError(
-                f"HTTP error: {e.response.status_code}", underlying_error=e
-            )
-        except httpx.RequestError as e:
-            logger.error(f"Request error occurred: {e.request.url}")
-            raise OperationError("Request error", underlying_error=e)
-        finally:
-            if session:
+
+            try:
+                request_headers = session.headers.copy()
+                if headers:
+                    request_headers.update(headers)
+
+                response = await self._client.request(
+                    method,
+                    url,
+                    params=params,
+                    json=json,
+                    headers=request_headers,
+                    cookies=session.cookies,
+                    timeout=10.0,
+                )
+                response.raise_for_status()
+                rate_limit_state = _parse_rate_limit_headers(response.headers)
+                if rate_limit_state:
+                    await self._session_pool.update_rate_limit(
+                        session.session_id, operation, rate_limit_state
+                    )
+                return response.json()
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (401, 403):
+                    logger.warning(
+                        f"Session {session.session_id} failed with {e.response.status_code}. "
+                        "Retrying with another session if available."
+                    )
+                    last_exception = OperationError(
+                        f"Upstream auth error: {e.response.status_code}",
+                        underlying_error=e,
+                    )
+                    excluded_session_ids.add(session.session_id)
+                    # continue to the next iteration to get a new session
+                else:
+                    # For other HTTP errors, we don't retry.
+                    raise OperationError(
+                        f"HTTP error: {e.response.status_code}", underlying_error=e
+                    )
+            except httpx.RequestError as e:
+                # For transport errors, we don't retry.
+                logger.error(f"Request error occurred: {e.request.url}")
+                raise OperationError("Request error", underlying_error=e)
+            finally:
                 await self._session_pool.release_session(session.session_id)
 
 
