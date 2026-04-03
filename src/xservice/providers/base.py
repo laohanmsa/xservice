@@ -30,7 +30,7 @@ class BaseProvider(Provider):
         json: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        session = await self._session_pool.get_session()
+        session = await self._session_pool.get_session(operation=operation)
         if not session:
             raise SessionAcquisitionError("No available sessions in the pool.")
 

@@ -162,3 +162,105 @@ async def test_update_rate_limit_normalizes_legacy_flat_state(
         },
         operation: current_rate_limit,
     }
+
+
+@pytest.fixture
+def session_b():
+    return Session(session_id="test_session_b", headers={}, cookies={})
+
+
+@pytest.mark.asyncio
+async def test_get_session_selects_highest_quota(
+    session_pool: SessionPool, sample_session: Session, session_b: Session
+):
+    """
+    Proves get_session picks the session with the highest remaining quota
+    for the requested operation.
+    """
+    op = "SearchTimeline"
+    sample_session.rate_limit_info = {op: {"remaining": 10}}
+    session_b.rate_limit_info = {op: {"remaining": 50}}
+    await session_pool.add_session(sample_session)
+    await session_pool.add_session(session_b)
+
+    # First acquisition should get the one with 50 remaining
+    s1 = await session_pool.get_session(operation=op)
+    assert s1 is not None
+    assert s1.session_id == "test_session_b"
+
+    # Next should get the one with 10 remaining
+    s2 = await session_pool.get_session(operation=op)
+    assert s2 is not None
+    assert s2.session_id == "test_session"
+
+    # Release and check again
+    await session_pool.release_session(s1.session_id)
+    s3 = await session_pool.get_session(operation=op)
+    assert s3 is not None
+    assert s3.session_id == "test_session_b"
+
+
+@pytest.mark.asyncio
+async def test_get_session_fallback_is_queue_like(
+    session_pool: SessionPool, sample_session: Session, session_b: Session
+):
+    """
+    Proves get_session fallback (no operation or no session with op data)
+    is queue-like (FIFO), not MRU/LRU.
+    """
+    # session_b is "less recently used", but added to the pool later.
+    sample_session.last_used = 100
+    session_b.last_used = 0
+
+    # Add to pool in order: sample_session, then session_b
+    await session_pool.add_session(sample_session)
+    await session_pool.add_session(session_b)
+
+    # 1. Fallback for unknown operation
+    # First session out should be the first one in (sample_session)
+    s1 = await session_pool.get_session(operation="unknown_op")
+    assert s1 is not None
+    assert s1.session_id == "test_session"
+
+    # Second one out should be session_b
+    s2 = await session_pool.get_session(operation="unknown_op")
+    assert s2 is not None
+    assert s2.session_id == "test_session_b"
+
+    # Release them to make them available again
+    await session_pool.release_session(s1.session_id)
+    await session_pool.release_session(s2.session_id)
+
+    # 2. Fallback for operation=None
+    # First session out should be the first one that was returned to the queue
+    s3 = await session_pool.get_session()
+    assert s3 is not None
+    assert s3.session_id == "test_session"
+
+    s4 = await session_pool.get_session()
+    assert s4 is not None
+    assert s4.session_id == "test_session_b"
+
+
+
+@pytest.mark.asyncio
+async def test_get_session_ignores_legacy_flat_quota(
+    session_pool: SessionPool, sample_session: Session, session_b: Session
+):
+    """
+    Proves get_session selection logic does not break on legacy flat
+    rate limit data, and correctly picks the session with modern data.
+    """
+    op = "SearchTimeline"
+    # Legacy session
+    sample_session.rate_limit_info = {"remaining": 100, "limit": 100}
+    # Modern session
+    session_b.rate_limit_info = {op: {"remaining": 50}}
+
+    await session_pool.add_session(sample_session)
+    await session_pool.add_session(session_b)
+
+    session = await session_pool.get_session(operation=op)
+    assert session is not None
+    # It should pick the only one that has data for the operation
+    assert session.session_id == "test_session_b"

@@ -30,27 +30,94 @@ class SessionPool:
                 self._sessions[session.session_id] = session
                 await self._available_sessions.put(session.session_id)
 
-    async def get_session(self) -> Optional[Session]:
+    async def get_session(self, operation: Optional[str] = None) -> Optional[Session]:
         """Get an available session from the pool.
+
+        If an operation is specified, it returns the session with the highest
+        remaining quota for that operation.
 
         Waits for a session to become available if none are currently free.
         """
         if self._closed:
             return None
 
-        session_id = await self._available_sessions.get()
+        # Wait for at least one session to be available. This is the blocking part.
+        initial_session_id = await self._available_sessions.get()
+
         async with self._lock:
             if self._closed:
-                # This can happen if close() is called while a task is waiting on the queue
-                await self._available_sessions.put(session_id)  # Put it back
+                # Pool was closed after we waited.
+                # Put session back and exit.
+                await self._available_sessions.put(initial_session_id)
                 return None
 
-            session = self._sessions.get(session_id)
-            if session:
-                session.in_use = True
-                session.last_used = time.time()
-                return session
-        return None  # Should not happen in normal operation
+            # We now have a lock. Gather any other sessions that became available.
+            other_session_ids = []
+            while not self._available_sessions.empty():
+                other_session_ids.append(self._available_sessions.get_nowait())
+
+            all_ids = [initial_session_id] + other_session_ids
+            available_sessions = [
+                self._sessions[sid] for sid in all_ids if sid in self._sessions
+            ]
+
+            if not available_sessions:
+                # This can happen if sessions were removed after their ID was queued.
+                # Put the IDs back and let the caller retry.
+                for sid in all_ids:
+                    await self._available_sessions.put(sid)
+                return None  # Caller should retry if they want.
+
+            # Select the best session from the available ones.
+            best_session = self._find_best_session(available_sessions, operation)
+
+            # Mark the chosen session as in use.
+            best_session.in_use = True
+            best_session.last_used = time.time()
+
+            # Put the other available sessions back into the queue.
+            for s in available_sessions:
+                if s.session_id != best_session.session_id:
+                    await self._available_sessions.put(s.session_id)
+
+            return best_session
+
+    def _find_best_session(
+        self, sessions: list[Session], operation: Optional[str]
+    ) -> Session:
+        """Find the best session from a list of available sessions."""
+        if not sessions:
+            raise ValueError("Cannot find best session in an empty list.")
+
+        # If no operation, return first available session (queue-like)
+        if not operation:
+            return sessions[0]
+
+        candidates = []
+        fallback_sessions = []
+        for s in sessions:
+            if not isinstance(s.rate_limit_info, dict):
+                fallback_sessions.append(s)
+                continue
+
+            op_quota = s.rate_limit_info.get(operation)
+            if (
+                isinstance(op_quota, dict)
+                and "remaining" in op_quota
+                and isinstance(op_quota["remaining"], int)
+            ):
+                candidates.append((s, op_quota["remaining"]))
+            else:
+                fallback_sessions.append(s)
+
+        if candidates:
+            # Sort by remaining quota, descending.
+            candidates.sort(key=lambda x: x[1], reverse=True)
+            return candidates[0][0]
+
+        # Fallback if no session has info for this operation.
+        # The list is already in a stable, dequeued order.
+        return fallback_sessions[0]
 
     async def release_session(self, session_id: str) -> None:
         """Release a session back to the pool."""
