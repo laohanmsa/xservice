@@ -3,10 +3,13 @@ services:
     build: .
     environment:
       - DATABASE_URL=${DATABASE_URL:?DATABASE_URL is not set}
+      - DEFAULT_COOKIE_FILE_PATH=${DEFAULT_COOKIE_FILE_PATH:-}
+      - DEFAULT_COOKIE_EXPECTED_COUNT=${DEFAULT_COOKIE_EXPECTED_COUNT:-4}
     ports:
       - "${XSERVICE_PORT:-8000}:8000"
     volumes:
       - ./src:/app/src
+      - ./.secrets:/app/.secrets:ro
     depends_on:
       - postgres
     restart: unless-stopped

@@ -8,6 +8,7 @@ from xservice.api.dependencies import get_db
 from xservice.main import create_app
 from xservice.models import Base, ApiKey as ApiKeyModel
 from xservice.schemas import ApiKeyCreate
+from xservice.settings import settings
 from xservice.services.control_plane import ControlPlaneService
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -18,6 +19,12 @@ engine = create_engine(
     poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+@pytest.fixture(autouse=True)
+def disable_default_cookie_bootstrap(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings, "DEFAULT_COOKIE_FILE_PATH", None)
+    monkeypatch.setattr(settings, "DEFAULT_COOKIE_EXPECTED_COUNT", 4)
 
 
 @pytest.fixture(name="db")

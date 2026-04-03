@@ -23,7 +23,16 @@ This document describes the process for deploying the `xservice` application to 
     POSTGRES_USER=xservice_user
     POSTGRES_PASSWORD=a_very_strong_and_secret_password
     POSTGRES_DB=xservice_prod
+    DEFAULT_COOKIE_FILE_PATH=/app/.secrets/default_cookies.txt
+    DEFAULT_COOKIE_EXPECTED_COUNT=4
     ```
+
+2.  **Create the default cookie secret file**:
+    If you want the app to always keep four default X sessions available,
+    create `/home/anchen/xservice/.secrets/default_cookies.txt` on `buda` and
+    store one raw cookie string per line. The compose stack mounts `./.secrets`
+    into the container read-only, so those secrets stay outside git while still
+    being available at startup.
 
 ## Deployment Steps
 

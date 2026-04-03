@@ -1,10 +1,12 @@
 import secrets
 import uuid
 from http.cookies import SimpleCookie
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
+from ..logging import log
 
 _X_BEARER_TOKEN = (
     "Bearer "
@@ -47,6 +49,18 @@ def _build_headers_for_cookies(cookies: dict[str, str]) -> dict[str, str]:
     }
 
 
+def _default_cookie_label(index: int) -> str:
+    return f"default-cookie-{index}"
+
+
+def _read_cookie_lines(cookie_file_path: str) -> list[str]:
+    return [
+        line.strip()
+        for line in Path(cookie_file_path).read_text().splitlines()
+        if line.strip()
+    ]
+
+
 class ControlPlaneService:
     def __init__(self, db: Session):
         self.db = db
@@ -77,6 +91,78 @@ class ControlPlaneService:
             schemas.XAccountSessionRateLimitInfo.model_validate(session)
             for session in self.get_sessions()
         ]
+
+    def _find_session_for_default_cookie(
+        self,
+        sessions: list[models.XAccountSession],
+        *,
+        label: str,
+        cookies: dict[str, str],
+    ) -> models.XAccountSession | None:
+        auth_token = cookies.get("auth_token")
+        twid = cookies.get("twid")
+
+        for session in sessions:
+            if session.label == label:
+                return session
+
+        for session in sessions:
+            existing_cookies = session.cookies or {}
+            if auth_token and existing_cookies.get("auth_token") == auth_token:
+                return session
+            if twid and existing_cookies.get("twid") == twid:
+                return session
+
+        return None
+
+    def bootstrap_default_sessions(
+        self, *, cookie_file_path: str, expected_count: int = 4
+    ) -> int:
+        cookie_lines = _read_cookie_lines(cookie_file_path)
+        if len(cookie_lines) < expected_count:
+            log.warning(
+                "startup: expected %s default cookie lines, found %s",
+                expected_count,
+                len(cookie_lines),
+            )
+
+        sessions = self.get_sessions()
+        ensured_sessions: list[models.XAccountSession] = []
+
+        for index, cookie_string in enumerate(cookie_lines[:expected_count], start=1):
+            label = _default_cookie_label(index)
+            cookies = _parse_cookie_string(cookie_string)
+            headers = _build_headers_for_cookies(cookies)
+            existing = self._find_session_for_default_cookie(
+                sessions, label=label, cookies=cookies
+            )
+
+            if existing:
+                existing.username = label
+                existing.label = label
+                existing.is_active = True
+                existing.cookies = cookies
+                existing.headers = headers
+                ensured_sessions.append(existing)
+                continue
+
+            created = models.XAccountSession(
+                session_id=uuid.uuid4(),
+                username=label,
+                label=label,
+                is_active=True,
+                cookies=cookies,
+                headers=headers,
+            )
+            self.db.add(created)
+            sessions.append(created)
+            ensured_sessions.append(created)
+
+        self.db.commit()
+        for session in ensured_sessions:
+            self.db.refresh(session)
+
+        return len(ensured_sessions)
 
     def create_session(self, session: schemas.XAccountSessionCreate):
         db_session = models.XAccountSession(**session.model_dump(), session_id=uuid.uuid4())

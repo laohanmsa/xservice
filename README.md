@@ -34,7 +34,14 @@ An operator-facing backend service for accessing X/Twitter data.
     poetry run alembic upgrade head
     ```
 
-5.  **Run the API server**:
+5.  **Optional default session bootstrap**:
+    If you want the app to always reconcile a default pool of cookie-backed X
+    sessions on startup, create a local secret file at
+    `.secrets/default_cookies.txt` with one raw cookie string per line. The
+    default `.env.example` points the app at `/app/.secrets/default_cookies.txt`
+    inside Docker and expects 4 cookie lines.
+
+6.  **Run the API server**:
     ```bash
     poetry run uvicorn xservice.main:app --reload
     ```
@@ -49,6 +56,10 @@ The API is versioned under the `/api/v1` prefix. The major route groups are:
 -   `/search`: Endpoints for searching X/Twitter.
 -   `/users`: Endpoints for retrieving user profiles, timelines, followers, and other user-related data.
 -   `/tweets`: Endpoints for retrieving tweet details, retweeters, and favoriters.
+
+The follower/following endpoints currently return X's upstream timeline order.
+X does not expose a true asc/desc relationship-time ordering control for those
+operations, so xservice does not fake one.
 
 ## Command-Line Interface (CLI)
 

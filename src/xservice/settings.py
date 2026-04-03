@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     # Override this in real deployments if you do not want a shared default key.
     PLAYGROUND_DEFAULT_API_KEY: str = "xservice-playground-key"
 
+    # Optional startup bootstrap for default X sessions. The file should contain
+    # one raw cookie string per line and live outside git-tracked sources.
+    DEFAULT_COOKIE_FILE_PATH: str | None = None
+    DEFAULT_COOKIE_EXPECTED_COUNT: int = 4
+
     # For local development, a SQLite database is used by default.
     # You can override this with a PostgreSQL connection string.
     # e.g., DATABASE_URL=postgresql://user:password@localhost/xservice
