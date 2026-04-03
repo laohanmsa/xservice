@@ -70,6 +70,8 @@ class SessionPool:
 
         if not isinstance(session.rate_limit_info, dict):
             session.rate_limit_info = {}
+        elif "limit" in session.rate_limit_info and "remaining" in session.rate_limit_info:
+            session.rate_limit_info = {"default": session.rate_limit_info}
 
         session.rate_limit_info[operation] = rate_limit_state
         if self._on_rate_limit_update and session.db_id is not None:

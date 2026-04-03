@@ -134,3 +134,31 @@ async def test_update_rate_limit_for_multiple_operations(
         operation1: rate_limit1,
         operation2: rate_limit2,
     }
+
+
+@pytest.mark.asyncio
+async def test_update_rate_limit_normalizes_legacy_flat_state(
+    session_pool: SessionPool, sample_session: Session
+):
+    sample_session.rate_limit_info = {
+        "limit": 187,
+        "remaining": 186,
+        "reset": 1775174376,
+    }
+    await session_pool.add_session(sample_session)
+
+    operation = "SearchTimeline"
+    current_rate_limit = {"limit": 50, "remaining": 49, "reset": 1775175000}
+    await session_pool.update_rate_limit(
+        sample_session.session_id, operation, current_rate_limit
+    )
+
+    session = session_pool._sessions[sample_session.session_id]
+    assert session.rate_limit_info == {
+        "default": {
+            "limit": 187,
+            "remaining": 186,
+            "reset": 1775174376,
+        },
+        operation: current_rate_limit,
+    }
